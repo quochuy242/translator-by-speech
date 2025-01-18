@@ -1,0 +1,26 @@
+[project]
+name = "translator-by-speech"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "librosa>=0.10.2.post1",
+    "matplotlib>=3.10.0",
+    "protobuf>=5.29.3",
+    "pyaudio>=0.2.14",
+    "pytest-mock>=3.14.0",
+    "sentencepiece>=0.2.0",
+    "torch>=2.5.1",
+    "transformers>=4.48.0",
+    "wave>=0.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "ruff>=0.9.2",
+]
+
+[tool.ruff]
+indent-width = 2
