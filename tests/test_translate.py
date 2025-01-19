@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
-from src.translator import (
+from translator_by_speech.translator import (
   load_en2vi_model,
   load_vi2en_model,
   translate_en2vi,

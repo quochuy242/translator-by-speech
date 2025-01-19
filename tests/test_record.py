@@ -1,62 +1,106 @@
-from src.helpers import record_audio
-import numpy as np
-import pytest
-import pyaudio
+from unittest.mock import MagicMock, patch
 
-duration = 5
-sample_rate = 16000
-chunk_size = 1024
+import pytest
+
+from translator_by_speech.record import record_audio
+
+
+# Mock logger to prevent output during testing
+class MockLogger:
+  def warning(self, msg):
+    pass
+
+  def info(self, msg):
+    pass
+
+  def error(self, msg):
+    pass
 
 
 @pytest.fixture
-def mock_pyaudio(mocker):
-  """
-  Mock the PyAudio library to avoid actual audio recording.
-  """
-  mock_audio = mocker.MagicMock(spec=pyaudio.PyAudio)
-  mock_stream = mocker.MagicMock()
-  mock_audio.open.return_value = mock_stream
-
-  # Simulate generated audio data (e.g., silence)
-  total_chunks = int(sample_rate / chunk_size * duration)
-  silent_audio = b"\x00\x00" * chunk_size  # Silent audio bytes
-
-  mock_stream.read.side_effect = [silent_audio] * total_chunks
-  return mock_audio, mock_stream
+def mock_logger():
+  return MockLogger()
 
 
-def test_record_audio(mocker, mock_pyaudio):
-  """
-  Test the record_audio function.
-  """
-  # Arrange
-  mock_audio, mock_stream = mock_pyaudio
-  mocker.patch("pyaudio.PyAudio", return_value=mock_audio)
+@pytest.fixture
+def mock_tempfile():
+  with patch("tempfile.NamedTemporaryFile") as mock_temp:
+    mock_temp.return_value.name = "/assets/tmp/test_audio.wav"
+    yield mock_temp
 
-  # Simulate silent audio
-  silent_audio = b"\x00\x00" * chunk_size
-  total_chunks = int(sample_rate / chunk_size * duration)
-  mock_stream.read.side_effect = [silent_audio] * total_chunks
 
-  # Act
-  audio_data = record_audio(duration, sample_rate, chunk_size)
+@pytest.fixture
+def mock_input_stream():
+  with patch("sounddevice.InputStream") as mock_stream:
+    yield mock_stream
 
-  # Assert
-  expected_samples = total_chunks * chunk_size
-  assert isinstance(audio_data, np.ndarray), "Audio data should be a numpy array"
-  assert len(audio_data) == expected_samples, (
-    f"Audio data length does not match expected duration ({len(audio_data)} != {expected_samples})"
+
+@pytest.fixture
+def mock_soundfile():
+  with patch("soundfile.SoundFile") as mock_sf:
+    yield mock_sf
+
+
+@pytest.fixture
+def mock_queue():
+  with patch("queue.Queue") as mock_q:
+    yield mock_q
+
+
+@pytest.mark.parametrize(
+  "filename, expected_filename",
+  [
+    ("/assets/tmp/output.wav", "/assets/tmp/output.wav"),  # Test with explicit filename
+    (
+      None,
+      "/assets/tmp/test_audio.wav",
+    ),  # Test with None, temporary file should be created
+  ],
+)
+def test_record_audio(
+  mock_logger,
+  mock_tempfile,
+  mock_input_stream,
+  mock_soundfile,
+  mock_queue,
+  filename,
+  expected_filename,
+):
+  # Setup mocks
+  mock_sf = mock_soundfile.return_value.__enter__.return_value
+  mock_sf.write = MagicMock()
+
+  mock_stream = mock_input_stream.return_value.__enter__.return_value
+  mock_stream.read = MagicMock(return_value=(b"fake_audio_data", 1024))
+
+  # Call the function
+  with patch("sys.stderr.write"):  # Suppress stderr output
+    result = record_audio(filename=filename, sample_rate=16000)
+
+  # Assertions
+  mock_tempfile.assert_called_once()  # Ensure tempfile was called when filename is None
+  mock_sf.write.assert_called()  # Ensure that the write method of SoundFile was called
+  assert result == expected_filename  # Ensure the correct filename is returned
+  mock_input_stream.assert_called_once()  # Ensure InputStream was initialized
+
+
+def test_record_audio_keyboard_interrupt(
+  mock_logger, mock_input_stream, mock_soundfile, mock_queue
+):
+  # Test KeyboardInterrupt handling
+  mock_sf = mock_soundfile.return_value.__enter__.return_value
+  mock_sf.write = MagicMock()
+
+  mock_stream = mock_input_stream.return_value.__enter__.return_value
+  mock_stream.read = MagicMock(return_value=(b"fake_audio_data", 1024))
+
+  with (
+    patch("sys.stderr.write"),
+    patch("builtins.input", side_effect=KeyboardInterrupt),
+  ):
+    _ = record_audio(filename="/assets/tmp/output.wav", sample_rate=16000)
+
+  # Ensure the function handles KeyboardInterrupt gracefully
+  mock_logger.info.assert_called_with(
+    "Recording stopped. File saved in /assets/tmp/output.wav."
   )
-  assert audio_data.dtype == np.int16, "Audio data should be 16-bit PCM format"
-
-  # Ensure PyAudio methods were called as expected
-  mock_audio.open.assert_called_once_with(
-    format=pyaudio.paInt16,
-    channels=1,
-    rate=sample_rate,
-    input=True,
-    frames_per_buffer=chunk_size,
-  )
-  mock_stream.read.assert_called()
-
-  print("Test passed successfully!")
